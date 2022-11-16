@@ -136,6 +136,7 @@ struct test_data {
 	unsigned int io_id[2];
 	uint8_t client_num;
 	int step;
+	bool reconnect;
 };
 
 struct iso_client_data {
@@ -146,6 +147,7 @@ struct iso_client_data {
 	bool server;
 	bool bcast;
 	bool defer;
+	bool disconnect;
 };
 
 static void mgmt_debug(const char *str, void *user_data)
@@ -541,6 +543,12 @@ static const struct iovec send_16_2_1 = {
 	.iov_len = sizeof(data_16_2_1),
 };
 
+static const uint8_t data_48_2_1[100] = { [0 ... 99] = 0xff };
+static const struct iovec send_48_2_1 = {
+	.iov_base = (void *)data_48_2_1,
+	.iov_len = sizeof(data_48_2_1),
+};
+
 static const struct iso_client_data connect_16_2_1_send = {
 	.qos = QOS_16_2_1,
 	.expect_err = 0,
@@ -567,10 +575,25 @@ static const struct iso_client_data connect_16_2_1_defer_send = {
 	.defer = true,
 };
 
+static const struct iso_client_data connect_48_2_1_defer_send = {
+	.qos = QOS_48_2_1,
+	.expect_err = 0,
+	.send = &send_16_2_1,
+	.defer = true,
+};
+
 static const struct iso_client_data listen_16_2_1_defer_recv = {
 	.qos = QOS_16_2_1,
 	.expect_err = 0,
 	.recv = &send_16_2_1,
+	.server = true,
+	.defer = true,
+};
+
+static const struct iso_client_data listen_48_2_1_defer_recv = {
+	.qos = QOS_48_2_1,
+	.expect_err = 0,
+	.recv = &send_48_2_1,
 	.server = true,
 	.defer = true,
 };
@@ -588,6 +611,18 @@ static const struct iso_client_data connect_16_2_1_send_recv = {
 	.expect_err = 0,
 	.send = &send_16_2_1,
 	.recv = &send_16_2_1,
+};
+
+static const struct iso_client_data disconnect_16_2_1 = {
+	.qos = QOS_16_2_1,
+	.expect_err = 0,
+	.disconnect = true,
+};
+
+static const struct iso_client_data reconnect_16_2_1 = {
+	.qos = QOS_16_2_1,
+	.expect_err = 0,
+	.disconnect = true,
 };
 
 static const struct iso_client_data bcast_16_2_1_send = {
@@ -641,13 +676,42 @@ static void client_connectable_complete(uint16_t opcode, uint8_t status,
 	}
 }
 
+static void bthost_recv_data(const void *buf, uint16_t len, void *user_data)
+{
+	struct test_data *data = user_data;
+	const struct iso_client_data *isodata = data->test_data;
+
+	tester_print("Client received %u bytes of data", len);
+
+	if (isodata->send && (isodata->send->iov_len != len ||
+			memcmp(isodata->send->iov_base, buf, len))) {
+		if (!isodata->recv->iov_base)
+			tester_test_failed();
+	} else
+		tester_test_passed();
+}
+
+static void bthost_iso_disconnected(void *user_data)
+{
+	struct test_data *data = user_data;
+
+	tester_print("ISO handle 0x%04x disconnected", data->handle);
+
+	data->handle = 0x0000;
+}
+
 static void iso_new_conn(uint16_t handle, void *user_data)
 {
 	struct test_data *data = user_data;
+	struct bthost *host;
 
 	tester_print("New client connection with handle 0x%04x", handle);
 
 	data->handle = handle;
+
+	host = hciemu_client_get_host(data->hciemu);
+	bthost_add_iso_hook(host, data->handle, bthost_recv_data, data,
+				bthost_iso_disconnected);
 }
 
 static void acl_new_conn(uint16_t handle, void *user_data)
@@ -687,7 +751,7 @@ static void setup_powered_callback(uint8_t status, uint16_t length,
 		if (!isodata)
 			continue;
 
-		if (isodata->send || isodata->recv)
+		if (isodata->send || isodata->recv || isodata->disconnect)
 			bthost_set_iso_cb(host, iso_new_conn, data);
 
 		if (isodata->bcast) {
@@ -966,7 +1030,7 @@ static bool check_io_qos(const struct bt_iso_io_qos *io1,
 		return false;
 	}
 
-	if (io1->sdu != io2->sdu) {
+	if (io1->sdu && io2->sdu && io1->sdu != io2->sdu) {
 		tester_warn("Unexpected IO SDU: %u != %u", io1->sdu, io2->sdu);
 		return false;
 	}
@@ -1075,34 +1139,15 @@ static void iso_recv(struct test_data *data, GIOChannel *io)
 	data->io_id[0] = g_io_add_watch(io, G_IO_IN, iso_recv_data, data);
 }
 
-static void bthost_recv_data(const void *buf, uint16_t len, void *user_data)
-{
-	struct test_data *data = user_data;
-	const struct iso_client_data *isodata = data->test_data;
-
-	tester_print("Client received %u bytes of data", len);
-
-	if (isodata->send && (isodata->send->iov_len != len ||
-			memcmp(isodata->send->iov_base, buf, len))) {
-		if (!isodata->recv->iov_base)
-			tester_test_failed();
-	} else
-		tester_test_passed();
-}
-
 static void iso_send(struct test_data *data, GIOChannel *io)
 {
 	const struct iso_client_data *isodata = data->test_data;
-	struct bthost *host;
 	ssize_t ret;
 	int sk;
 
 	sk = g_io_channel_unix_get_fd(io);
 
 	tester_print("Writing %zu bytes of data", isodata->send->iov_len);
-
-	host = hciemu_client_get_host(data->hciemu);
-	bthost_add_iso_hook(host, data->handle, bthost_recv_data, data);
 
 	ret = writev(sk, isodata->send, 1);
 	if (ret < 0 || isodata->send->iov_len != (size_t) ret) {
@@ -1119,6 +1164,49 @@ static void iso_send(struct test_data *data, GIOChannel *io)
 
 	if (isodata->recv)
 		iso_recv(data, io);
+}
+
+static void setup_connect(struct test_data *data, uint8_t num, GIOFunc func);
+static gboolean iso_connect_cb(GIOChannel *io, GIOCondition cond,
+							gpointer user_data);
+
+static gboolean iso_disconnected(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	struct test_data *data = user_data;
+
+	data->io_id[0] = 0;
+
+	if ((cond & G_IO_HUP) && !data->handle) {
+		tester_print("Successfully disconnected");
+
+		if (data->reconnect) {
+			data->reconnect = false;
+			setup_connect(data, 0, iso_connect_cb);
+			return FALSE;
+		}
+
+		tester_test_passed();
+	} else
+		tester_test_failed();
+
+	return FALSE;
+}
+
+static void iso_shutdown(struct test_data *data, GIOChannel *io)
+{
+	int sk;
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	data->io_id[0] = g_io_add_watch(io, G_IO_HUP, iso_disconnected, data);
+
+	/* Shutdown using SHUT_WR as SHUT_RDWR cause the socket to HUP
+	 * immediately instead of waiting for Disconnect Complete event.
+	 */
+	shutdown(sk, SHUT_WR);
+
+	tester_print("Disconnecting...");
 }
 
 static gboolean iso_connect(GIOChannel *io, GIOCondition cond,
@@ -1174,6 +1262,8 @@ static gboolean iso_connect(GIOChannel *io, GIOCondition cond,
 			iso_send(data, io);
 		else if (isodata->recv)
 			iso_recv(data, io);
+		else if (isodata->disconnect)
+			iso_shutdown(data, io);
 		else
 			tester_test_passed();
 	}
@@ -1233,6 +1323,19 @@ static void setup_connect(struct test_data *data, uint8_t num, GIOFunc func)
 	}
 
 	if (isodata->defer) {
+		int defer;
+		socklen_t len;
+
+		/* Check if socket has DEFER_SETUP set */
+		len = sizeof(defer);
+		if (getsockopt(sk, SOL_BLUETOOTH, BT_DEFER_SETUP, &defer,
+				&len) < 0) {
+			tester_warn("getsockopt: %s (%d)", strerror(errno),
+								errno);
+			tester_test_failed();
+			return;
+		}
+
 		memset(&pfd, 0, sizeof(pfd));
 		pfd.fd = sk;
 		pfd.events = POLLOUT;
@@ -1270,6 +1373,19 @@ static void test_connect(const void *test_data)
 	struct test_data *data = tester_get_data();
 
 	setup_connect(data, 0, iso_connect_cb);
+}
+
+static void setup_reconnect(struct test_data *data, uint8_t num, GIOFunc func)
+{
+	data->reconnect = true;
+	setup_connect(data, num, func);
+}
+
+static void test_reconnect(const void *test_data)
+{
+	struct test_data *data = tester_get_data();
+
+	setup_reconnect(data, 0, iso_connect_cb);
 }
 
 static void test_defer(const void *test_data)
@@ -1430,7 +1546,7 @@ static void setup_listen(struct test_data *data, uint8_t num, GIOFunc func)
 		client = hciemu_get_client(data->hciemu, 0);
 		host = hciemu_client_host(client);
 
-		bthost_set_cig_params(host, 0x01, 0x01);
+		bthost_set_cig_params(host, 0x01, 0x01, &isodata->qos);
 		bthost_create_cis(host, 257, data->acl_handle);
 	}
 }
@@ -1674,7 +1790,15 @@ int main(int argc, char *argv[])
 							setup_powered,
 							test_connect);
 
+	test_iso("ISO 48_2_1 Defer Send - Success", &connect_48_2_1_defer_send,
+							setup_powered,
+							test_connect);
+
 	test_iso("ISO Defer Receive - Success", &listen_16_2_1_defer_recv,
+						setup_powered, test_listen);
+
+	test_iso("ISO 48_2_1 Defer Receive - Success",
+						&listen_48_2_1_defer_recv,
 						setup_powered, test_listen);
 
 	test_iso("ISO Defer Reject - Success", &listen_16_2_1_defer_reject,
@@ -1683,6 +1807,14 @@ int main(int argc, char *argv[])
 	test_iso("ISO Send and Receive - Success", &connect_16_2_1_send_recv,
 							setup_powered,
 							test_connect);
+
+	test_iso("ISO Disconnect - Success", &disconnect_16_2_1,
+							setup_powered,
+							test_connect);
+
+	test_iso("ISO Reconnect - Success", &reconnect_16_2_1,
+							setup_powered,
+							test_reconnect);
 
 	test_iso("ISO Broadcaster - Success", &bcast_16_2_1_send, setup_powered,
 							test_bcast);

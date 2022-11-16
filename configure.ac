@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 AC_PREREQ(2.60)
-AC_INIT(bluez, 5.65)
+AC_INIT(bluez, 5.66)
 
 AM_INIT_AUTOMAKE([foreign subdir-objects color-tests silent-rules
 					tar-pax no-dist-gzip dist-xz])
@@ -194,6 +194,18 @@ AM_CONDITIONAL(HOG, test "${enable_hog}" != "no")
 AC_ARG_ENABLE(health, AS_HELP_STRING([--enable-health],
 		[enable health profiles]), [enable_health=${enableval}])
 AM_CONDITIONAL(HEALTH, test "${enable_health}" = "yes")
+
+AC_ARG_ENABLE(bap, AS_HELP_STRING([--disable-bap],
+		[disable BAP profile]), [enable_bap=${enableval}])
+AM_CONDITIONAL(BAP, test "${enable_bap}" != "no")
+
+AC_ARG_ENABLE(mcp, AS_HELP_STRING([--disable-mcp],
+        [disable MCP profile]), [enable_mcp=${enableval}])
+AM_CONDITIONAL(MCP, test "${enable_mcp}" != "no")
+
+AC_ARG_ENABLE(vcp, AS_HELP_STRING([--disable-vcp],
+		[disable VCP profile]), [enable_vcp=${enableval}])
+AM_CONDITIONAL(VCP, test "${enable_vcp}" != "no")
 
 AC_ARG_ENABLE(tools, AS_HELP_STRING([--disable-tools],
 		[disable Bluetooth tools]), [enable_tools=${enableval}])

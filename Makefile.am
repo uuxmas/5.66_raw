@@ -82,7 +82,7 @@ pkginclude_HEADERS += $(lib_headers)
 lib_LTLIBRARIES += lib/libbluetooth.la
 
 lib_libbluetooth_la_SOURCES = $(lib_headers) $(lib_sources)
-lib_libbluetooth_la_LDFLAGS = $(AM_LDFLAGS) -version-info 22:7:19
+lib_libbluetooth_la_LDFLAGS = $(AM_LDFLAGS) -version-info 22:8:19
 lib_libbluetooth_la_DEPENDENCIES = $(local_headers)
 endif
 
@@ -230,7 +230,10 @@ shared_sources = src/shared/io.h src/shared/timeout.h \
 			src/shared/gatt-db.h src/shared/gatt-db.c \
 			src/shared/gap.h src/shared/gap.c \
 			src/shared/log.h src/shared/log.c \
-			src/shared/tty.h
+			src/shared/bap.h src/shared/bap.c src/shared/ascs.h \
+			src/shared/mcs.h src/shared/mcp.h src/shared/mcp.c \
+			src/shared/vcp.c src/shared/vcp.h \
+			src/shared/lc3.h src/shared/tty.h
 
 if READLINE
 shared_sources += src/shared/shell.c src/shared/shell.h
@@ -407,6 +410,11 @@ EXTRA_DIST += tools/magic.btsnoop
 
 AM_CPPFLAGS += $(DBUS_CFLAGS) $(GLIB_CFLAGS) -I$(builddir)/lib
 
+unit_tests += unit/test-tester
+
+unit_test_tester_SOURCES = unit/test-tester.c
+unit_test_tester_LDADD = src/libshared-glib.la lib/libbluetooth-internal.la \
+								$(GLIB_LIBS)
 
 unit_tests += unit/test-eir
 

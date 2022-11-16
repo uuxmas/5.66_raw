@@ -257,7 +257,7 @@ struct btd_device {
 
 	sdp_list_t	*tmp_records;
 
-	gboolean	trusted;
+	bool		trusted;
 	gboolean	blocked;
 	gboolean	auto_connect;
 	gboolean	disable_auto_connect;
@@ -301,7 +301,7 @@ static bool get_initiator(struct btd_device *dev)
 	if (dev->bredr_state.connected)
 		return dev->bredr_state.initiator;
 
-	return false;
+	return dev->att_io ? true : false;
 }
 
 static GSList *find_service_with_profile(GSList *list, struct btd_profile *p)
@@ -826,7 +826,7 @@ bool device_is_bonded(struct btd_device *device, uint8_t bdaddr_type)
 	return state->bonded;
 }
 
-gboolean device_is_trusted(struct btd_device *device)
+bool btd_device_is_trusted(struct btd_device *device)
 {
 	return device->trusted;
 }
@@ -1163,7 +1163,7 @@ static gboolean dev_property_get_trusted(const GDBusPropertyTable *property,
 					DBusMessageIter *iter, void *data)
 {
 	struct btd_device *device = data;
-	gboolean val = device_is_trusted(device);
+	gboolean val = btd_device_is_trusted(device);
 
 	dbus_message_iter_append_basic(iter, DBUS_TYPE_BOOLEAN, &val);
 
@@ -3731,9 +3731,12 @@ static void device_add_gatt_services(struct btd_device *device)
 static void device_accept_gatt_profiles(struct btd_device *device)
 {
 	GSList *l;
+	bool initiator = get_initiator(device);
+
+	DBG("initiator %s", initiator ? "true" : "false");
 
 	for (l = device->services; l != NULL; l = g_slist_next(l))
-		service_accept(l->data, get_initiator(device));
+		service_accept(l->data, initiator);
 }
 
 static void device_remove_gatt_service(struct btd_device *device,
@@ -4509,6 +4512,12 @@ GSList *btd_device_get_uuids(struct btd_device *device)
 	return device->uuids;
 }
 
+bool btd_device_has_uuid(struct btd_device *device, const char *uuid)
+{
+	return g_slist_find_custom(device->uuids, uuid,
+						(GCompareFunc)strcasecmp);
+}
+
 struct probe_data {
 	struct btd_device *dev;
 	GSList *uuids;
@@ -4574,7 +4583,8 @@ void device_probe_profile(gpointer a, gpointer b)
 
 	device->services = g_slist_append(device->services, service);
 
-	if (!profile->auto_connect || !device->general_connect)
+	if (!profile->auto_connect || (!btd_device_is_connected(device) &&
+					!device->general_connect))
 		return;
 
 	device->pending = g_slist_append(device->pending, service);
@@ -5361,6 +5371,9 @@ static void att_connect_cb(GIOChannel *io, GError *gerr, gpointer user_data)
 		goto done;
 	}
 
+	/* Update connected state */
+	device->le_state.connected = true;
+
 	if (!device_attach_att(device, io))
 		goto done;
 
@@ -5414,6 +5427,9 @@ int device_connect_le(struct btd_device *dev)
 
 	DBG("Connection attempt to: %s", addr);
 
+	/* Set as initiator */
+	dev->le_state.initiator = true;
+
 	if (dev->le_state.paired)
 		sec_level = BT_IO_SEC_MEDIUM;
 	else
@@ -5451,8 +5467,6 @@ int device_connect_le(struct btd_device *dev)
 
 	/* Keep this, so we can cancel the connection */
 	dev->att_io = io;
-	/* Set as initiator */
-	dev->le_state.initiator = true;
 
 	return 0;
 }
@@ -6030,7 +6044,7 @@ void device_bonding_complete(struct btd_device *device, uint8_t bdaddr_type,
 		 * treated as a newly discovered device.
 		 */
 		if (!device_is_paired(device, bdaddr_type) &&
-				!device_is_trusted(device))
+				!btd_device_is_trusted(device))
 			btd_device_set_temporary(device, true);
 
 		device_bonding_failed(device, status);
@@ -6812,6 +6826,11 @@ void btd_device_set_pnpid(struct btd_device *device, uint16_t source,
 uint32_t btd_device_get_current_flags(struct btd_device *dev)
 {
 	return dev->current_flags;
+}
+
+uint32_t btd_device_get_supported_flags(struct btd_device *dev)
+{
+	return dev->supported_flags;
 }
 
 /* This event is sent immediately after add device on all mgmt sockets.

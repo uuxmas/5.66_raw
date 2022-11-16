@@ -57,7 +57,6 @@ static GDBusProxy *default_dev;
 static GDBusProxy *default_attr;
 static GList *ctrl_list;
 static GList *battery_proxies;
-static GList *admin_devices_proxies;
 
 static const char *agent_arguments[] = {
 	"on",
@@ -563,26 +562,6 @@ static void admon_manager_added(GDBusProxy *proxy)
 	adv_monitor_register_app(dbus_conn);
 }
 
-static void admin_policy_set_added(GDBusProxy *proxy)
-{
-	admin_policy_set_set_proxy(proxy);
-}
-
-static void admin_policy_status_added(GDBusProxy *proxy)
-{
-	struct adapter *adapter;
-
-	adapter = find_ctrl(ctrl_list, g_dbus_proxy_get_path(proxy));
-
-	if (!adapter) {
-		admin_devices_proxies = g_list_append(admin_devices_proxies,
-									proxy);
-		return;
-	}
-
-	admin_policy_set_status_proxy(proxy);
-}
-
 static void proxy_added(GDBusProxy *proxy, void *user_data)
 {
 	const char *interface;
@@ -618,10 +597,6 @@ static void proxy_added(GDBusProxy *proxy, void *user_data)
 	} else if (!strcmp(interface,
 				"org.bluez.AdvertisementMonitorManager1")) {
 		admon_manager_added(proxy);
-	} else if (!strcmp(interface, "org.bluez.AdminPolicySet1")) {
-		admin_policy_set_added(proxy);
-	} else if (!strcmp(interface, "org.bluez.AdminPolicyStatus1")) {
-		admin_policy_status_added(proxy);
 	}
 }
 
@@ -678,26 +653,6 @@ static void adapter_removed(GDBusProxy *proxy)
 	}
 }
 
-static void admin_policy_set_removed(GDBusProxy *proxy)
-{
-	admin_policy_set_set_proxy(NULL);
-}
-
-static void admin_policy_status_removed(GDBusProxy *proxy)
-{
-	struct adapter *adapter;
-
-	adapter = find_ctrl(ctrl_list, g_dbus_proxy_get_path(proxy));
-
-	if (!adapter) {
-		admin_devices_proxies = g_list_remove(admin_devices_proxies,
-									proxy);
-		return;
-	}
-
-	admin_policy_set_status_proxy(NULL);
-}
-
 static void proxy_removed(GDBusProxy *proxy, void *user_data)
 {
 	const char *interface;
@@ -738,10 +693,6 @@ static void proxy_removed(GDBusProxy *proxy, void *user_data)
 	} else if (!strcmp(interface,
 			"org.bluez.AdvertisementMonitorManager1")) {
 		adv_monitor_remove_manager(dbus_conn);
-	} else if (!strcmp(interface, "org.bluez.AdminPolicySet1")) {
-		admin_policy_set_removed(proxy);
-	} else if (!strcmp(interface, "org.bluez.AdminPolicyStatus1")) {
-		admin_policy_status_removed(proxy);
 	}
 }
 
@@ -1030,6 +981,7 @@ static void cmd_show(int argc, char *argv[])
 	print_property(adapter->proxy, "Alias");
 	print_property(adapter->proxy, "Class");
 	print_property(adapter->proxy, "Powered");
+	print_property(adapter->proxy, "PowerState");
 	print_property(adapter->proxy, "Discoverable");
 	print_property(adapter->proxy, "DiscoverableTimeout");
 	print_property(adapter->proxy, "Pairable");
@@ -1772,7 +1724,6 @@ static struct GDBusProxy *find_device(int argc, char *argv[])
 static void cmd_info(int argc, char *argv[])
 {
 	GDBusProxy *proxy;
-	GDBusProxy *admin_proxy;
 	GDBusProxy *battery_proxy;
 	DBusMessageIter iter;
 	const char *address;
@@ -1819,12 +1770,8 @@ static void cmd_info(int argc, char *argv[])
 
 	battery_proxy = find_proxies_by_path(battery_proxies,
 					g_dbus_proxy_get_path(proxy));
-	admin_proxy = find_proxies_by_path(admin_devices_proxies,
-					g_dbus_proxy_get_path(proxy));
 	print_property_with_label(battery_proxy, "Percentage",
 					"Battery Percentage");
-	print_property_with_label(admin_proxy, "AffectedByPolicy",
-					"Affected by Policy");
 
 	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
 }
@@ -2569,7 +2516,7 @@ static void cmd_advertise(int argc, char *argv[])
 
 	if (!default_ctrl || !default_ctrl->ad_proxy) {
 		bt_shell_printf("LEAdvertisingManager not found\n");
-		bt_shell_noninteractive_quit(EXIT_FAILURE);
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
 	}
 
 	if (enable == TRUE)
@@ -2948,22 +2895,6 @@ static void cmd_adv_monitor_get_supported_info(int argc, char *argv[])
 	adv_monitor_get_supported_info();
 }
 
-static void cmd_admin_allow(int argc, char *argv[])
-{
-	if (check_default_ctrl() == FALSE)
-		return bt_shell_noninteractive_quit(EXIT_FAILURE);
-
-	if (argc <= 1) {
-		admin_policy_read_service_allowlist(dbus_conn);
-		return;
-	}
-
-	if (strcmp(argv[1], "clear") == 0)
-		argc--;
-
-	admin_policy_set_service_allowlist(dbus_conn, argc - 1, argv + 1);
-}
-
 static const struct bt_shell_menu advertise_menu = {
 	.name = "advertise",
 	.desc = "Advertise Options Submenu",
@@ -3118,15 +3049,6 @@ static const struct bt_shell_menu gatt_menu = {
 	{ } },
 };
 
-static const struct bt_shell_menu admin_menu = {
-	.name = "admin",
-	.desc = "Admin Policy Submenu",
-	.entries = {
-	{ "allow", "[clear/uuid1 uuid2 ...]", cmd_admin_allow,
-				"Allow service UUIDs and block rest of them"},
-	{} },
-};
-
 static const struct bt_shell_menu main_menu = {
 	.name = "main",
 	.entries = {
@@ -3188,23 +3110,27 @@ static const struct bt_shell_menu main_menu = {
 
 static const struct option options[] = {
 	{ "agent",	required_argument, 0, 'a' },
+	{ "endpoints",	no_argument, 0, 'e' },
 	{ 0, 0, 0, 0 }
 };
 
 static const char *agent_option;
+static const char *endpoint_option;
 
 static const char **optargs[] = {
-	&agent_option
+	&agent_option,
+	&endpoint_option
 };
 
 static const char *help[] = {
-	"Register agent handler: <capability>"
+	"Register agent handler: <capability>",
+	"Register Media endpoints"
 };
 
 static const struct bt_shell_opt opt = {
 	.options = options,
 	.optno = sizeof(options) / sizeof(struct option),
-	.optstr = "a:",
+	.optstr = "a:e",
 	.optarg = optargs,
 	.help = help,
 };
@@ -3225,7 +3151,6 @@ int main(int argc, char *argv[])
 	bt_shell_add_submenu(&advertise_monitor_menu);
 	bt_shell_add_submenu(&scan_menu);
 	bt_shell_add_submenu(&gatt_menu);
-	bt_shell_add_submenu(&admin_menu);
 	bt_shell_set_prompt(PROMPT_OFF);
 
 	if (agent_option)
@@ -3238,6 +3163,11 @@ int main(int argc, char *argv[])
 
 	bt_shell_set_env("DBUS_CONNECTION", dbus_conn);
 
+	if (endpoint_option)
+		bt_shell_set_env("AUTO_REGISTER_ENDPOINT",
+					(void *)endpoint_option);
+
+	admin_add_submenu();
 	player_add_submenu();
 
 	client = g_dbus_client_new(dbus_conn, "org.bluez", "/org/bluez");
@@ -3253,6 +3183,7 @@ int main(int argc, char *argv[])
 
 	status = bt_shell_run();
 
+	admin_remove_submenu();
 	player_remove_submenu();
 
 	g_dbus_client_unref(client);

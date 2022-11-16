@@ -146,6 +146,46 @@ extern "C" {
 /* GATT Server Supported features */
 #define GATT_CHARAC_SERVER_FEAT				0x2B3A
 
+/* TODO: Update these on final UUID is given */
+#define PACS_UUID					0x1850
+#define PAC_SINK_CHRC_UUID				0x2bc9
+#define PAC_SINK_UUID		"00002bc9-0000-1000-8000-00805f9b34fb"
+#define PAC_SINK_LOC_CHRC_UUID				0x2bca
+
+#define PAC_SOURCE_CHRC_UUID				0x2bcb
+#define PAC_SOURCE_UUID		"00002bcb-0000-1000-8000-00805f9b34fb"
+#define PAC_SOURCE_LOC_CHRC_UUID			0x2bcc
+
+#define PAC_CONTEXT					0x2bcd
+#define PAC_SUPPORTED_CONTEXT				0x2bce
+
+#define ASCS_UUID					0x184e
+#define ASE_SINK_UUID					0x2bc4
+#define ASE_SOURCE_UUID					0x2bc5
+#define ASE_CP_UUID					0x2bc6
+
+#define VCS_UUID					0x1844
+#define VOL_OFFSET_CS_UUID				0x1845
+#define AUDIO_INPUT_CS_UUID				0x1843
+#define VOL_STATE_CHRC_UUID				0x2B7D
+#define VOL_CP_CHRC_UUID				0x2B7E
+#define VOL_FLAG_CHRC_UUID				0x2B7F
+
+#define GMCS_UUID                               0x1849
+#define MEDIA_PLAYER_NAME_CHRC_UUID             0x2b93
+#define MEDIA_TRACK_CHNGD_CHRC_UUID             0x2b96
+#define MEDIA_TRACK_TITLE_CHRC_UUID             0x2b97
+#define MEDIA_TRACK_DURATION_CHRC_UUID          0x2b98
+#define MEDIA_TRACK_POSTION_CHRC_UUID           0x2b99
+#define MEDIA_PLAYBACK_SPEED_CHRC_UUID          0x2b9a
+#define MEDIA_SEEKING_SPEED_CHRC_UUID           0x2b9b
+#define MEDIA_PLAYING_ORDER_CHRC_UUID           0x2ba1
+#define MEDIA_PLAY_ORDER_SUPPRTD_CHRC_UUID      0x2ba2
+#define MEDIA_STATE_CHRC_UUID                   0x2ba3
+#define MEDIA_CP_CHRC_UUID                      0x2ba4
+#define MEDIA_CP_OP_SUPPORTED_CHRC_UUID         0x2ba5
+#define MEDIA_CONTENT_CONTROL_ID_CHRC_UUID      0x2bba
+
 typedef struct {
 	enum {
 		BT_UUID_UNSPEC = 0,

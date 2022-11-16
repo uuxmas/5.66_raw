@@ -1238,7 +1238,8 @@ static void populate_gatt_service(struct btd_gatt_database *database)
 				NULL, NULL, database);
 
 	database->svc_chngd_ccc = service_add_ccc(service, database, NULL, NULL,
-								    0, NULL);
+						BT_ATT_PERM_READ |
+						BT_ATT_PERM_WRITE, NULL);
 
 	bt_uuid16_create(&uuid, GATT_CHARAC_CLI_FEAT);
 	database->cli_feat = gatt_db_service_add_characteristic(service,
@@ -1726,8 +1727,10 @@ static bool parse_chrc_flags(DBusMessageIter *array, uint8_t *props,
 			*perm |= BT_ATT_PERM_WRITE;
 		} else if (!strcmp("notify", flag)) {
 			*props |= BT_GATT_CHRC_PROP_NOTIFY;
+			*ccc_perm |= BT_ATT_PERM_WRITE;
 		} else if (!strcmp("indicate", flag)) {
 			*props |= BT_GATT_CHRC_PROP_INDICATE;
+			*ccc_perm |= BT_ATT_PERM_WRITE;
 		} else if (!strcmp("authenticated-signed-writes", flag)) {
 			*props |= BT_GATT_CHRC_PROP_AUTH;
 			*perm |= BT_ATT_PERM_WRITE;
@@ -2192,27 +2195,43 @@ static bool parse_handle(GDBusProxy *proxy, uint16_t *handle)
 	return true;
 }
 
-static uint8_t dbus_error_to_att_ecode(const char *error_name, uint8_t perm_err)
+static uint8_t dbus_error_to_att_ecode(const char *name, const char *msg,
+				       uint8_t perm_err)
 {
-	if (strcmp(error_name, ERROR_INTERFACE ".Failed") == 0)
-		return 0x80;  /* For now return this "application error" */
+	if (strcmp(name, ERROR_INTERFACE ".Failed") == 0) {
+		char *endptr = NULL;
+		uint32_t ecode;
 
-	if (strcmp(error_name, ERROR_INTERFACE ".NotSupported") == 0)
+		ecode = strtol(msg, &endptr, 0);
+
+		/* If message doesn't set an error code just use 0x80 */
+		if (!endptr || *endptr != '\0')
+			return 0x80;
+
+		if (ecode < 0x80 || ecode > 0x9f) {
+			error("Invalid error code: %s", msg);
+			return BT_ATT_ERROR_UNLIKELY;
+		}
+
+		return ecode;
+	}
+
+	if (strcmp(name, ERROR_INTERFACE ".NotSupported") == 0)
 		return BT_ATT_ERROR_REQUEST_NOT_SUPPORTED;
 
-	if (strcmp(error_name, ERROR_INTERFACE ".NotAuthorized") == 0)
+	if (strcmp(name, ERROR_INTERFACE ".NotAuthorized") == 0)
 		return BT_ATT_ERROR_AUTHORIZATION;
 
-	if (strcmp(error_name, ERROR_INTERFACE ".InvalidValueLength") == 0)
+	if (strcmp(name, ERROR_INTERFACE ".InvalidValueLength") == 0)
 		return BT_ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LEN;
 
-	if (strcmp(error_name, ERROR_INTERFACE ".InvalidOffset") == 0)
+	if (strcmp(name, ERROR_INTERFACE ".InvalidOffset") == 0)
 		return BT_ATT_ERROR_INVALID_OFFSET;
 
-	if (strcmp(error_name, ERROR_INTERFACE ".InProgress") == 0)
+	if (strcmp(name, ERROR_INTERFACE ".InProgress") == 0)
 		return BT_ERROR_ALREADY_IN_PROGRESS;
 
-	if (strcmp(error_name, ERROR_INTERFACE ".NotPermitted") == 0)
+	if (strcmp(name, ERROR_INTERFACE ".NotPermitted") == 0)
 		return perm_err;
 
 	return BT_ATT_ERROR_UNLIKELY;
@@ -2236,7 +2255,7 @@ static void read_reply_cb(DBusMessage *message, void *user_data)
 
 	if (dbus_set_error_from_message(&err, message) == TRUE) {
 		DBG("Failed to read value: %s: %s", err.name, err.message);
-		ecode = dbus_error_to_att_ecode(err.name,
+		ecode = dbus_error_to_att_ecode(err.name, err.message,
 					BT_ATT_ERROR_READ_NOT_PERMITTED);
 		dbus_error_free(&err);
 		goto done;
@@ -2415,7 +2434,7 @@ static void write_reply_cb(DBusMessage *message, void *user_data)
 
 	if (dbus_set_error_from_message(&err, message) == TRUE) {
 		DBG("Failed to write value: %s: %s", err.name, err.message);
-		ecode = dbus_error_to_att_ecode(err.name,
+		ecode = dbus_error_to_att_ecode(err.name, err.message,
 					BT_ATT_ERROR_WRITE_NOT_PERMITTED);
 		dbus_error_free(&err);
 		goto done;
@@ -2610,7 +2629,7 @@ static void acquire_write_reply(DBusMessage *message, void *user_data)
 
 		error("Failed to acquire write: %s\n", err.name);
 
-		ecode = dbus_error_to_att_ecode(err.name,
+		ecode = dbus_error_to_att_ecode(err.name, err.message,
 					BT_ATT_ERROR_WRITE_NOT_PERMITTED);
 		dbus_error_free(&err);
 
@@ -2848,17 +2867,19 @@ static void property_changed_cb(GDBusProxy *proxy, const char *name,
 	if (strcmp(name, "Value"))
 		return;
 
-	if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_ARRAY) {
-		DBG("Malformed \"Value\" property received");
-		return;
-	}
+	if (iter) {
+		if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_ARRAY) {
+			DBG("Malformed \"Value\" property received");
+			return;
+		}
 
-	dbus_message_iter_recurse(iter, &array);
-	dbus_message_iter_get_fixed_array(&array, &value, &len);
+		dbus_message_iter_recurse(iter, &array);
+		dbus_message_iter_get_fixed_array(&array, &value, &len);
 
-	if (len < 0) {
-		DBG("Malformed \"Value\" property received");
-		return;
+		if (len < 0) {
+			DBG("Malformed \"Value\" property received");
+			return;
+		}
 	}
 
 	/* Truncate the value if it's too large */
@@ -2879,6 +2900,9 @@ static bool database_add_ccc(struct external_service *service,
 	if (!(chrc->props & BT_GATT_CHRC_PROP_NOTIFY) &&
 				!(chrc->props & BT_GATT_CHRC_PROP_INDICATE))
 		return true;
+
+	/* Always set read/write permissions */
+	chrc->ccc_perm |= BT_ATT_PERM_WRITE | BT_ATT_PERM_READ;
 
 	chrc->ccc = service_add_ccc(service->attrib, service->app->database,
 				    ccc_write_cb, chrc, chrc->ccc_perm, NULL);
@@ -2989,7 +3013,7 @@ static void desc_write_cb(struct gatt_db_attribute *attrib,
 	}
 
 	if (opcode == BT_ATT_OP_PREP_WRITE_REQ) {
-		if (!device_is_trusted(device) && !desc->prep_authorized &&
+		if (!btd_device_is_trusted(device) && !desc->prep_authorized &&
 						desc->req_prep_authorization)
 			send_write(att, attrib, desc->proxy,
 					desc->pending_writes, id, value, len,
@@ -3120,7 +3144,7 @@ static void chrc_write_cb(struct gatt_db_attribute *attrib,
 		queue = NULL;
 
 	if (opcode == BT_ATT_OP_PREP_WRITE_REQ) {
-		if (!device_is_trusted(device) && !chrc->prep_authorized &&
+		if (!btd_device_is_trusted(device) && !chrc->prep_authorized &&
 						chrc->req_prep_authorization)
 			send_write(att, attrib, chrc->proxy, queue,
 					id, value, len, offset,
@@ -3516,8 +3540,8 @@ static void register_characteristic(void *data, void *user_data)
 {
 	struct gatt_app *app = user_data;
 	GDBusProxy *proxy = data;
-	const char *iface = g_dbus_proxy_get_interface(proxy);
-	const char *path = g_dbus_proxy_get_path(proxy);
+	const char *iface;
+	const char *path;
 
 	if (app->failed)
 		return;

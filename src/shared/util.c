@@ -65,7 +65,7 @@ void *util_memdup(const void *src, size_t size)
 void util_debug_va(util_debug_func_t function, void *user_data,
 				const char *format, va_list va)
 {
-	char str[78];
+	char str[MAX_INPUT];
 
 	if (!function || !format)
 		return;
@@ -338,7 +338,7 @@ static const struct {
 	{ 0x1849, "Generic Media Control"			},
 	{ 0x184b, "Telephony Bearer"				},
 	{ 0x184c, "Generic Telephony Bearer"			},
-	{ 0x184c, "Microphone Control"				},
+	{ 0x184d, "Microphone Control"				},
 	{ 0x184e, "Audio Stream Control"			},
 	{ 0x184f, "Broadcast Audio Scan"			},
 	{ 0x1850, "Published Audio Capabilities"		},

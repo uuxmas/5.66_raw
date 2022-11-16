@@ -54,6 +54,7 @@ struct device_addr_type {
 
 int device_addr_type_cmp(gconstpointer a, gconstpointer b);
 GSList *btd_device_get_uuids(struct btd_device *device);
+bool btd_device_has_uuid(struct btd_device *device, const char *uuid);
 void device_probe_profiles(struct btd_device *device, GSList *profiles);
 
 void btd_device_set_record(struct btd_device *device, const char *uuid,
@@ -88,7 +89,7 @@ gboolean device_is_temporary(struct btd_device *device);
 bool device_is_connectable(struct btd_device *device);
 bool device_is_paired(struct btd_device *device, uint8_t bdaddr_type);
 bool device_is_bonded(struct btd_device *device, uint8_t bdaddr_type);
-gboolean device_is_trusted(struct btd_device *device);
+bool btd_device_is_trusted(struct btd_device *device);
 void device_set_paired(struct btd_device *dev, uint8_t bdaddr_type);
 void device_set_unpaired(struct btd_device *dev, uint8_t bdaddr_type);
 void btd_device_set_temporary(struct btd_device *device, bool temporary);
@@ -176,6 +177,7 @@ int device_discover_services(struct btd_device *device);
 int btd_device_connect_services(struct btd_device *dev, GSList *services);
 
 uint32_t btd_device_get_current_flags(struct btd_device *dev);
+uint32_t btd_device_get_supported_flags(struct btd_device *dev);
 void btd_device_flags_changed(struct btd_device *dev, uint32_t supported_flags,
 			      uint32_t current_flags);
 

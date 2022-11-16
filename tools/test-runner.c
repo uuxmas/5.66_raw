@@ -250,7 +250,6 @@ static void start_qemu(void)
 				"rootfstype=9p "
 				"rootflags=trans=virtio,version=9p2000.u "
 				"acpi=off pci=noacpi noapic quiet ro init=%s "
-				"bluetooth.enable_ecred=1 "
 				"TESTHOME=%s TESTDBUS=%u TESTDAEMON=%u "
 				"TESTDBUSSESSION=%u XDG_RUNTIME_DIR=/run/user/0 "
 				"TESTAUDIO=%u "
@@ -614,6 +613,8 @@ static const char *test_table[] = {
 	"rfcomm-tester",
 	"sco-tester",
 	"iso-tester",
+	"mesh-tester",
+	"ioctl-tester",
 	"bnep-tester",
 	"check-selftest",
 	"tools/mgmt-tester",
@@ -622,6 +623,8 @@ static const char *test_table[] = {
 	"tools/rfcomm-tester",
 	"tools/sco-tester",
 	"tools/iso-tester",
+	"tools/mesh-tester",
+	"tools/ioctl-tester",
 	"tools/bnep-tester",
 	"tools/check-selftest",
 	NULL
