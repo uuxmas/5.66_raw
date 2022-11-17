@@ -1,6 +1,7 @@
-bluez (5.66-1) UNRELEASED; urgency=medium
+bluez (5.66-1) unstable; urgency=medium
 
   * Update to 5.66.
+  * Refresh d/patches/Fix-typo.patch.
 
  -- Nobuhiro Iwamatsu <iwamatsu@debian.org>  Thu, 17 Nov 2022 03:44:23 +0900
 
